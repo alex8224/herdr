@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## [0.9.0] - 2026-08-13
+
+### Added
+- Native Windows panes can now render Kitty Terminal Graphics Protocol (TGP) images when `experimental.kitty_graphics` is enabled. The pinned bundled ConPTY runtime preserves Kitty APC sequences so pane applications can display inline images.
+
+### Fixed
+- Windows ConPTY no longer swallows Kitty APC control sequences (`ESC_G ... ESC\`) emitted by pane applications.
+- Windows clients now query the host terminal for cell pixel size with `CSI 16 t` and forward the reply to panes, so image placement and XTWINOPS queries use real geometry.
+
 ## [0.8.0] - 2026-08-03
 
 ### Added

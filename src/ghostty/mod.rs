@@ -3512,6 +3512,26 @@ mod tests {
     }
 
     #[test]
+    fn textual_image_png_virtual_placement_is_queryable() {
+        let mut terminal = Terminal::new(10, 5, 0).unwrap();
+        terminal.enable_kitty_graphics().unwrap();
+        terminal.resize(10, 5, 8, 16).unwrap();
+        terminal.write(b"\x1b_Gi=1193046,m=0,f=100,q=2;iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==\x1b\\");
+        terminal.write(b"\x1b_Ga=p,i=1193046,c=2,r=1,U=1,q=2\x1b\\");
+        terminal.write("\x1b[2;3H\x1b[38;2;18;52;86m\u{10eeee}\u{0305}\u{0305}\u{10eeee}\u{0305}\u{030d}\x1b[0m".as_bytes());
+
+        let placements = terminal.kitty_image_placements().unwrap();
+        assert_eq!(placements.len(), 1);
+        assert_eq!(placements[0].image_id, 1193046);
+        assert_eq!(placements[0].format, KittyImageFormat::Rgba);
+        assert_eq!(placements[0].data, [255, 0, 0, 255]);
+        assert_eq!(placements[0].render.viewport_col, 2);
+        assert_eq!(placements[0].render.viewport_row, 1);
+        assert_eq!(placements[0].render.grid_cols, 2);
+        assert_eq!(placements[0].render.grid_rows, 1);
+    }
+
+    #[test]
     fn unicode_width_helpers_match_terminal_layout_rules() {
         assert_eq!(unicode_codepoint_width('A' as u32), 1);
         assert_eq!(unicode_codepoint_width('\u{301}' as u32), 0);

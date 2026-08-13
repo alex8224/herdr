@@ -34,7 +34,6 @@ pub type HPCON = HANDLE;
 pub const PSUEDOCONSOLE_INHERIT_CURSOR: DWORD = 0x1;
 pub const PSEUDOCONSOLE_RESIZE_QUIRK: DWORD = 0x2;
 pub const PSEUDOCONSOLE_WIN32_INPUT_MODE: DWORD = 0x4;
-#[allow(dead_code)]
 pub const PSEUDOCONSOLE_PASSTHROUGH_MODE: DWORD = 0x8;
 
 type CreatePseudoConsoleFn = unsafe extern "system" fn(
@@ -309,7 +308,10 @@ impl PsuedoCon {
                 output.as_raw_handle() as _,
                 PSUEDOCONSOLE_INHERIT_CURSOR
                     | PSEUDOCONSOLE_RESIZE_QUIRK
-                    | PSEUDOCONSOLE_WIN32_INPUT_MODE,
+                    | PSEUDOCONSOLE_WIN32_INPUT_MODE
+                    // Preserve VT families unknown to ConPTY, including the
+                    // APC sequences used by the Kitty graphics protocol.
+                    | PSEUDOCONSOLE_PASSTHROUGH_MODE,
                 &mut con,
             )
         };

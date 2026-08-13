@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: herdr maintainers <maintainers@herdr.dev>
+Date: Wed, 13 Aug 2026 00:00:00 +0000
+Subject: [PATCH] windows: preserve unknown VT sequences through ConPTY
+
+Kitty graphics uses APC sequences (`ESC_G ... ESC\\`). Pass the ConPTY
+passthrough flag so supported bundled ConPTY builds preserve those sequences
+for the parent PTY reader.
+
+---
+ vendor/portable-pty/src/win/psuedocon.rs | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/vendor/portable-pty/src/win/psuedocon.rs b/vendor/portable-pty/src/win/psuedocon.rs
+index 21700f7..cae3e28 100644
+--- a/vendor/portable-pty/src/win/psuedocon.rs
++++ b/vendor/portable-pty/src/win/psuedocon.rs
+@@ -34,5 +34,4 @@ pub type HPCON = HANDLE;
+ pub const PSUEDOCONSOLE_INHERIT_CURSOR: DWORD = 0x1;
+ pub const PSEUDOCONSOLE_RESIZE_QUIRK: DWORD = 0x2;
+ pub const PSEUDOCONSOLE_WIN32_INPUT_MODE: DWORD = 0x4;
+-#[allow(dead_code)]
+ pub const PSEUDOCONSOLE_PASSTHROUGH_MODE: DWORD = 0x8;
+@@ -309,7 +308,10 @@ impl PsuedoCon {
+                 output.as_raw_handle() as _,
+                 PSUEDOCONSOLE_INHERIT_CURSOR
+                     | PSEUDOCONSOLE_RESIZE_QUIRK
+-                    | PSEUDOCONSOLE_WIN32_INPUT_MODE,
++                    | PSEUDOCONSOLE_WIN32_INPUT_MODE
++                    // Preserve VT families unknown to ConPTY, including the
++                    // APC sequences used by the Kitty graphics protocol.
++                    | PSEUDOCONSOLE_PASSTHROUGH_MODE,
+                 &mut con,
+             )
+         };
+-- 
+2.45.2

@@ -132,6 +132,16 @@ pub(crate) fn take_terminal_resize_signal() -> bool {
     false
 }
 
+/// Returns the host terminal cell size in pixels, when the platform can
+/// provide it without an escape-sequence round trip.
+///
+/// Windows implements this in `platform::windows`; other platforms derive the
+/// value from the terminal size ioctl in the client, so this is a no-op.
+#[cfg(not(windows))]
+pub(crate) fn host_terminal_cell_size() -> Option<(u32, u32)> {
+    None
+}
+
 #[cfg(unix)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClipboardCommand {

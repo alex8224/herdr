@@ -1,0 +1,70 @@
+---
+title: Windows Kitty graphics
+summary: Requirements and troubleshooting for Kitty Terminal Graphics Protocol images in native Windows panes.
+---
+
+Herdr can forward Kitty Terminal Graphics Protocol (TGP) images from native
+Windows panes when the experimental graphics path is enabled.
+
+## Requirements
+
+Enable the feature in the Herdr configuration:
+
+```toml
+[experimental]
+kitty_graphics = true
+```
+
+For native Windows panes, the packaged Windows build must include the pinned
+bundled ConPTY runtime. The bundled runtime is used to preserve Kitty's APC
+control sequences (`ESC_G ... ESC\\`) between a pane process and Herdr.
+
+The outer terminal must also implement the Kitty graphics commands emitted by
+Herdr. A recent WezTerm nightly has been verified. Older terminal builds may
+identify themselves as WezTerm but still fail to render the same TGP payload.
+
+## How the path works
+
+```text
+pane application
+  -> Kitty APC output
+  -> Windows ConPTY passthrough
+  -> Herdr pane parser
+  -> host Kitty graphics frame
+  -> outer terminal
+```
+
+Herdr queries the outer terminal for cell pixel geometry with `CSI 16 t` and
+uses the response to answer pane geometry queries and calculate image
+placements. On Windows the client supports both the VTI and crossterm input
+paths for the response:
+
+```text
+request:  ESC [ 16 t
+response: ESC [ 6 ; height ; width t
+```
+
+## Troubleshooting
+
+If the pane displays blank image cells or a text placeholder:
+
+1. Confirm that `kitty_graphics = true` is enabled for the client process.
+2. Confirm that the executable is from the packaged Windows build and that its
+   `conpty/` directory is present beside it.
+3. Test the outer terminal directly with a small Kitty graphics probe. If the
+   probe does not render outside Herdr, update or reconfigure the outer
+   terminal first.
+4. Check that the pane application receives a non-zero pixel cell size.
+5. Do not set `HERDR_WINDOWS_CONPTY=system` while diagnosing Kitty graphics;
+   the inbox Windows ConPTY may not preserve Kitty APC sequences.
+
+Without a compatible ConPTY runtime, Herdr continues to support normal text
+panes, but pane applications that emit Kitty APC graphics may fall back to a
+text or cell-based renderer.
+
+## Scope
+
+This support uses standard Kitty TGP and XTWINOPS sequences and is not tied to
+private WezTerm extensions. Other Windows terminals may work when they support
+the same TGP command subset and `CSI 16 t`, but each terminal/version should
+be tested independently.

@@ -139,8 +139,6 @@ pub enum RawInputEvent {
         colors: Vec<(u8, RgbColor)>,
     },
     HostColorSchemeChanged(HostAppearance),
-    // The dimensions are only read by the Unix client.
-    #[cfg_attr(not(any(unix, test)), allow(dead_code))]
     HostCellSizeReport {
         width_px: u32,
         height_px: u32,
@@ -166,6 +164,10 @@ impl RawInputFramer {
 
     pub(crate) fn host_color_query_sent(&mut self) {
         self.byte_framer.host_color_query_sent();
+    }
+
+    pub(crate) fn host_cell_size_query_sent(&mut self) {
+        self.byte_framer.host_cell_size_query_sent();
     }
 
     pub(crate) fn enable_host_color_scheme_change_tracking(&mut self) {
@@ -229,7 +231,6 @@ pub(crate) struct RawInputByteFramer {
 }
 
 const HOST_COLOR_QUERY_REPLIES: u16 = 258;
-#[cfg(any(unix, test))]
 const HOST_CELL_SIZE_QUERY_REPLIES: u16 = 1;
 const MAX_ORPHANED_SGR_MOUSE_TAIL_BYTES: usize = 32;
 
@@ -265,8 +266,7 @@ impl RawInputByteFramer {
     }
 
     /// Same hold window as `host_color_query_sent`, for the XTWINOPS cell size
-    /// reply. Only the Unix client sends this query.
-    #[cfg(any(unix, test))]
+    /// reply.
     pub(crate) fn host_cell_size_query_sent(&mut self) {
         self.host_cell_size_replies_awaited = HOST_CELL_SIZE_QUERY_REPLIES;
         self.held_pending_host_reply_esc = false;

@@ -1,5 +1,5 @@
 #[cfg(windows)]
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 #[cfg(windows)]
 use std::sync::Arc;
 
@@ -16,9 +16,17 @@ pub(super) fn raw_console_reader_loop(
     handle: windows_sys::Win32::Foundation::HANDLE,
     event_tx: mpsc::Sender<ClientLoopEvent>,
     should_quit: &Arc<AtomicBool>,
+    host_cell_size_query_sent: bool,
+    reported_cell_size: &Arc<AtomicU64>,
 ) {
     let mut mapper = WindowsInputMapper::default();
-    let mut pump = WindowsInputPump::default();
+    let mut pump = WindowsInputPump {
+        reported_cell_size: Some(reported_cell_size.clone()),
+        ..WindowsInputPump::default()
+    };
+    if host_cell_size_query_sent {
+        pump.framer.host_cell_size_query_sent();
+    }
 
     while !should_quit.load(Ordering::Acquire) {
         match windows_console_input_items(handle, &mut mapper) {
@@ -185,6 +193,7 @@ struct WindowsInputMapper {
 struct WindowsInputPump {
     framer: crate::raw_input::RawInputFramer,
     paste_from_win32_key_records: bool,
+    reported_cell_size: Option<Arc<AtomicU64>>,
 }
 
 impl Default for WindowsInputPump {
@@ -192,6 +201,7 @@ impl Default for WindowsInputPump {
         Self {
             framer: crate::raw_input::RawInputFramer::for_host_input(),
             paste_from_win32_key_records: false,
+            reported_cell_size: None,
         }
     }
 }
@@ -291,6 +301,9 @@ impl WindowsInputPump {
         &mut self,
         events: Vec<crate::raw_input::RawInputEvent>,
     ) -> Vec<crate::protocol::ClientInputEvent> {
+        if let Some(reported_cell_size) = &self.reported_cell_size {
+            super::store_host_cell_size_reports(&events, reported_cell_size);
+        }
         if events
             .iter()
             .any(|event| matches!(event, crate::raw_input::RawInputEvent::Paste(_)))

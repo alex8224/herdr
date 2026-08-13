@@ -1105,6 +1105,13 @@ impl App {
                             area,
                             cell_size,
                         );
+                    } else if cell_size.is_known() {
+                        crate::ui::compute_view_with_cell_size(
+                            &mut self.state,
+                            &self.terminal_runtimes,
+                            area,
+                            cell_size,
+                        );
                     } else {
                         crate::ui::compute_view_with_runtime_registry(
                             &mut self.state,

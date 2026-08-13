@@ -179,7 +179,9 @@ jobs:
           key: conpty-package-windows-2022
 
       - name: Build Herdr
-        run: cargo build --locked --target x86_64-pc-windows-msvc
+        run: |
+          cargo build --locked --target x86_64-pc-windows-msvc
+          cargo build --locked --target x86_64-pc-windows-msvc --example kitty_apc_passthrough
 
       - name: Verify invalid bundle is rejected and system override recovers
         shell: pwsh
@@ -242,6 +244,14 @@ jobs:
             -ExePath $exe `
             -Session "ci-conpty-bundled-windows-2022-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT" `
             -ExpectedConsoleHostPath $consoleHost
+
+      - name: Probe Kitty APC passthrough with bundled ConPTY
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $probe = Join-Path $PWD "target\x86_64-pc-windows-msvc\debug\examples\kitty_apc_passthrough.exe"
+          $bundle = Join-Path $env:HERDR_CONPTY_PACKAGE_DIR "conpty"
+          .\scripts\windows_kitty_apc_probe.ps1 -ProbeExePath $probe -BundlePath $bundle
 
       - name: Test packaged installer and repair with Windows PowerShell 5.1
         shell: pwsh

@@ -3,6 +3,7 @@ name = "herdr"
 version = "0.8.0"
 edition = "2021"
 build = "build.rs"
+
 description = "terminal workspace manager for AI coding agents"
 license = "Apache-2.0"
 repository = "https://github.com/herdrdev/herdr"
@@ -18,6 +19,10 @@ include = [
     "LICENSE",
     "Cargo.toml",
 ]
+
+[[example]]
+name = "kitty_apc_passthrough"
+path = "examples/kitty_apc_passthrough.rs"
 
 [dependencies]
 base64 = "0.22.1"

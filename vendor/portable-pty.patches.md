@@ -84,3 +84,40 @@ python3 -m unittest scripts.test_vendor_portable_pty
 ```
 
 On Windows, also run `cargo test raw_arg_appends_unescaped_windows_command_tail`.
+
+## 0003 preserve Kitty APC passthrough
+
+status: active
+
+patch: `vendor/patches/portable-pty/0003-preserve-kitty-apc-passthrough.patch`
+
+herdr issue: pending Windows Kitty graphics bug report
+
+upstream discussion: none
+
+upstream pr: none
+
+vendored base: `portable-pty 0.9.0`
+
+local files:
+
+- `vendor/portable-pty/src/win/psuedocon.rs`
+
+reason: Kitty Terminal Graphics Protocol commands use APC sequences in the
+`ESC_G ... ESC\\` family. Windows ConPTY can consume VT families it does not
+recognize before they reach Herdr's PTY reader. The passthrough flag preserves
+these sequences when supported by the selected ConPTY runtime. Herdr's pinned
+bundled ConPTY is required on systems whose inbox ConPTY ignores this flag.
+
+remove when: upstream `portable-pty` exposes an opt-in ConPTY passthrough
+option and the supported Windows ConPTY implementations preserve Kitty APC
+sequences without the local patch.
+
+verification:
+
+```sh
+python3 -m unittest scripts.test_vendor_portable_pty
+```
+
+On Windows, run the packaged ConPTY smoke test and the Kitty APC passthrough
+probe described in `docs/next/windows-kitty-graphics.md`.

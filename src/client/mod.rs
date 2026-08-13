@@ -17,7 +17,6 @@ mod direct_graphics;
 mod input;
 
 use std::collections::HashSet;
-#[cfg(unix)]
 use std::io::IsTerminal as _;
 use std::io::{self, BufRead, Write as _};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -700,7 +699,6 @@ fn handshake_read_timeout() -> Duration {
     LOCAL_HANDSHAKE_READ_TIMEOUT
 }
 
-#[cfg(any(unix, test))]
 fn direct_graphics_profile_values(
     term_program: &str,
     term: &str,
@@ -715,7 +713,6 @@ fn direct_graphics_profile_values(
     supported && !blocked_transport && terminals
 }
 
-#[cfg(unix)]
 fn direct_graphics_profile_allowed(direct_attach: bool) -> bool {
     let term_program = std::env::var("TERM_PROGRAM").unwrap_or_default();
     let term = std::env::var("TERM").unwrap_or_default();
@@ -731,11 +728,6 @@ fn direct_graphics_profile_allowed(direct_attach: bool) -> bool {
             || std::env::var_os("STY").is_some(),
         io::stdin().is_terminal() && io::stdout().is_terminal(),
     )
-}
-
-#[cfg(not(unix))]
-fn direct_graphics_profile_allowed(_direct_attach: bool) -> bool {
-    false
 }
 
 fn requested_keybindings() -> ClientKeybindings {
@@ -1417,6 +1409,7 @@ async fn run_client_loop(
         .lock()
         .map(|matcher| matcher.active_handle())
         .unwrap_or_default();
+    let stdin_reported_cell_size = reported_cell_size.clone();
     std::thread::spawn(move || {
         input::stdin_reader_loop(
             stdin_tx,
@@ -1425,6 +1418,7 @@ async fn run_client_loop(
             will_query_host_cell_size,
             stdin_mouse_capture_active,
             stdin_sgr_pixels_active,
+            stdin_reported_cell_size,
             #[cfg(unix)]
             stdin_direct_response,
             #[cfg(unix)]
@@ -1672,9 +1666,14 @@ async fn run_client_loop(
                     } else {
                         &[]
                     };
-                    let _ =
-                        write_encoded_frame_with_graphics(&mut stdout, &encoded.bytes, graphics);
-                    let _ = stdout.flush();
+                    if let Err(err) =
+                        write_encoded_frame_with_graphics(&mut stdout, &encoded.bytes, graphics)
+                    {
+                        warn!(%err, "failed to write frame to host terminal");
+                    }
+                    if let Err(err) = stdout.flush() {
+                        warn!(%err, "failed to flush frame to host terminal");
+                    }
                     state.blit_encoder.commit(frame_data, encoded);
                     state.repaint_pending = false;
                 }
@@ -2407,7 +2406,11 @@ fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 const DEFAULT_CELL_WIDTH_PX: u32 = 8;
 const DEFAULT_CELL_HEIGHT_PX: u32 = 16;
 
-/// Cell size derived from the terminal size ioctl, if it reports pixels.
+/// Exact cell size in pixels derived from the terminal size query.
+///
+/// `crossterm::terminal::window_size()` returns `Unsupported` on Windows, so
+/// this returns `None` there and callers fall back to the host XTWINOPS reply
+/// (exact) or the console font size (best-effort, never exact).
 fn ioctl_cell_size() -> Option<(u32, u32)> {
     let size = crossterm::terminal::window_size().ok()?;
     if size.columns == 0 || size.rows == 0 || size.width == 0 || size.height == 0 {
@@ -2419,6 +2422,14 @@ fn ioctl_cell_size() -> Option<(u32, u32)> {
     ))
 }
 
+/// Best-effort cell size for answering pane XTWINOPS queries when exact host
+/// pixel geometry is unavailable (Windows ConPTY). Never used to unlock direct
+/// graphics; that requires an exact ioctl or XTWINOPS reply.
+fn fallback_cell_size() -> (u32, u32) {
+    crate::platform::host_terminal_cell_size()
+        .unwrap_or((DEFAULT_CELL_WIDTH_PX, DEFAULT_CELL_HEIGHT_PX))
+}
+
 /// Cell size used when the ioctl reports no pixels.
 fn cell_size_fallback(reported: u64, last: Option<(u32, u32)>) -> (u32, u32) {
     unpack_cell_size(reported)
@@ -2426,7 +2437,6 @@ fn cell_size_fallback(reported: u64, last: Option<(u32, u32)>) -> (u32, u32) {
         .unwrap_or((DEFAULT_CELL_WIDTH_PX, DEFAULT_CELL_HEIGHT_PX))
 }
 
-#[cfg(any(unix, test))]
 fn pack_cell_size(width_px: u32, height_px: u32) -> u64 {
     (u64::from(width_px) << 32) | u64::from(height_px)
 }
@@ -2443,12 +2453,13 @@ fn current_terminal_geometry(
     last_cell_size: Option<(u32, u32)>,
 ) -> (u16, u16, u32, u32) {
     let (cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
-    if !kitty_graphics_enabled {
-        return (cols, rows, 0, 0);
-    }
-    let (cell_width_px, cell_height_px) = ioctl_cell_size().unwrap_or_else(|| {
-        cell_size_fallback(reported_cell_size.load(Ordering::Acquire), last_cell_size)
-    });
+    let (cell_width_px, cell_height_px) = if kitty_graphics_enabled {
+        ioctl_cell_size().unwrap_or_else(|| {
+            cell_size_fallback(reported_cell_size.load(Ordering::Acquire), last_cell_size)
+        })
+    } else {
+        fallback_cell_size()
+    };
     (cols, rows, cell_width_px, cell_height_px)
 }
 
@@ -2456,18 +2467,22 @@ fn current_terminal_geometry(
 /// only when the host supplied exact pixel dimensions through the ioctl.
 fn initial_terminal_geometry(kitty_graphics_enabled: bool) -> (u16, u16, u32, u32, bool) {
     let (cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
-    if !kitty_graphics_enabled {
-        return (cols, rows, 0, 0, false);
-    }
     match ioctl_cell_size() {
-        Some((width, height)) => (cols, rows, width, height, true),
-        None => (
-            cols,
-            rows,
-            DEFAULT_CELL_WIDTH_PX,
-            DEFAULT_CELL_HEIGHT_PX,
-            false,
-        ),
+        // Exact cell size only unlocks direct graphics; otherwise it still
+        // flows to the pane terminal so XTWINOPS queries get answered.
+        Some((width, height)) => (cols, rows, width, height, kitty_graphics_enabled),
+        None if kitty_graphics_enabled => {
+            // Windows ConPTY cannot provide an exact cell size through the
+            // ioctl; the host XTWINOPS reply arrives asynchronously after the
+            // handshake. Start direct graphics with the best-effort fallback
+            // and let the resize poller refine it once the reply lands.
+            let (width, height) = fallback_cell_size();
+            (cols, rows, width, height, true)
+        }
+        None => {
+            let (width, height) = fallback_cell_size();
+            (cols, rows, width, height, false)
+        }
     }
 }
 
@@ -2562,7 +2577,7 @@ fn query_host_cell_size() {
 }
 
 fn should_query_host_cell_size() -> bool {
-    !cfg!(windows)
+    true
 }
 
 /// Only pane graphics need pixel dimensions, and only when the ioctl cannot
@@ -2576,7 +2591,6 @@ fn write_host_cell_size_query(mut writer: impl io::Write) -> io::Result<()> {
     writer.flush()
 }
 
-#[cfg(any(unix, test))]
 fn store_reported_cell_size(reported_cell_size: &AtomicU64, width_px: u32, height_px: u32) {
     let packed = pack_cell_size(width_px, height_px);
     if reported_cell_size.swap(packed, Ordering::AcqRel) != packed {

@@ -91,6 +91,39 @@ pub(crate) fn terminal_title_for_presentation(title: &str) -> &str {
     title.strip_prefix("Administrator: ").unwrap_or(title)
 }
 
+/// Returns the host terminal cell size in pixels, read from the current
+/// console font.
+///
+/// `crossterm::terminal::window_size()` returns `Unsupported` on Windows, so
+/// the client cannot derive pixel geometry from it.  Reading the console font
+/// directly is the Windows equivalent of the Unix `TIOCGWINSZ` ioctl and lets
+/// pane graphics (kitty TGP) negotiate with real pixel dimensions.
+pub(crate) fn host_terminal_cell_size() -> Option<(u32, u32)> {
+    use windows_sys::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Console::{
+        GetCurrentConsoleFontEx, GetStdHandle, CONSOLE_FONT_INFOEX, STD_OUTPUT_HANDLE,
+    };
+
+    let handle: HANDLE = unsafe { GetStdHandle(STD_OUTPUT_HANDLE) };
+    if handle.is_null() || handle == INVALID_HANDLE_VALUE {
+        return None;
+    }
+
+    let mut font_info = CONSOLE_FONT_INFOEX::default();
+    font_info.cbSize = std::mem::size_of::<CONSOLE_FONT_INFOEX>() as u32;
+    // SAFETY: `font_info` is a correctly sized, valid `CONSOLE_FONT_INFOEX`.
+    if unsafe { GetCurrentConsoleFontEx(handle, 0, &mut font_info) } == 0 {
+        return None;
+    }
+
+    let width = font_info.dwFontSize.X;
+    let height = font_info.dwFontSize.Y;
+    if width <= 0 || height <= 0 {
+        return None;
+    }
+    Some((width as u32, height as u32))
+}
+
 const MAX_PROCESS_ENVIRONMENT_BYTES: usize = 256 * 1024;
 const PROCESS_ENVIRONMENT_READ_CHUNK_BYTES: usize = 16 * 1024;
 const PROCESS_RUNTIME_MARKER_CACHE_CAPACITY: usize = 1_024;

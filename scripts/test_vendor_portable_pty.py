@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import unittest
 from pathlib import Path
@@ -65,9 +66,9 @@ class VendorPortablePtyTests(unittest.TestCase):
         self.assertTrue(index.exists())
         text = index.read_text()
         missing = [
-            str(path.relative_to(project_root))
+            str(path.relative_to(project_root)).replace("\\", "/")
             for path in patches
-            if str(path.relative_to(project_root)) not in text
+            if str(path.relative_to(project_root)).replace("\\", "/") not in text
         ]
         self.assertEqual(missing, [])
 
@@ -76,7 +77,7 @@ class VendorPortablePtyTests(unittest.TestCase):
         index = project_root / "vendor" / "portable-pty.patches.md"
         text = index.read_text()
         listed = [
-            line.split("`", 2)[1]
+            line.split("`", 2)[1].replace("/", os.sep)
             for line in text.splitlines()
             if line.startswith("patch: `vendor/patches/portable-pty/")
         ]
@@ -117,6 +118,8 @@ class VendorPortablePtyTests(unittest.TestCase):
         self.assertIn("GetModuleHandleW", text)
         self.assertIn("HERDR_WINDOWS_CONPTY", text)
         self.assertIn("Sha256::new()", text)
+        self.assertIn("PSEUDOCONSOLE_PASSTHROUGH_MODE", text)
+        self.assertIn("| PSEUDOCONSOLE_PASSTHROUGH_MODE", text)
         self.assertNotIn('Path::new("conpty.dll")', text)
         self.assertNotIn("shared_library", text)
 

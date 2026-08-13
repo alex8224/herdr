@@ -10,7 +10,7 @@
 //! - We avoid duplicating parsing logic in the client
 //! - Host terminal control replies can be buffered or discarded before they leak
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 #[cfg(unix)]
@@ -42,6 +42,7 @@ pub fn stdin_reader_loop(
     host_cell_size_query_sent: bool,
     host_mouse_capture_active: Arc<AtomicBool>,
     host_sgr_pixels_active: Arc<AtomicBool>,
+    reported_cell_size: Arc<AtomicU64>,
     #[cfg(unix)] direct_response: Arc<std::sync::Mutex<super::direct_graphics::ResponseMatcher>>,
     #[cfg(unix)] direct_response_active: Arc<AtomicBool>,
 ) {
@@ -49,11 +50,15 @@ pub fn stdin_reader_loop(
     {
         let _ = (
             host_color_query_sent,
-            host_cell_size_query_sent,
             host_mouse_capture_active,
             host_sgr_pixels_active,
         );
-        windows_stdin_reader_loop(event_tx, should_quit);
+        windows_stdin_reader_loop(
+            event_tx,
+            should_quit,
+            host_cell_size_query_sent,
+            reported_cell_size,
+        );
     }
 
     #[cfg(unix)]
@@ -325,15 +330,33 @@ fn idle_flush_timeout_ms(
 fn windows_stdin_reader_loop(
     event_tx: mpsc::Sender<ClientLoopEvent>,
     should_quit: &Arc<AtomicBool>,
+    host_cell_size_query_sent: bool,
+    reported_cell_size: Arc<AtomicU64>,
 ) {
     if !super::windows_vti_input_backend_enabled() {
-        windows_crossterm_reader_loop(event_tx, should_quit);
+        windows_crossterm_reader_loop(
+            event_tx,
+            should_quit,
+            host_cell_size_query_sent,
+            &reported_cell_size,
+        );
     } else {
         match windows_vti::console_input_handle() {
             Ok(handle) if windows_vti::virtual_terminal_input_enabled(handle) => {
-                windows_vti::raw_console_reader_loop(handle, event_tx, should_quit);
+                windows_vti::raw_console_reader_loop(
+                    handle,
+                    event_tx,
+                    should_quit,
+                    host_cell_size_query_sent,
+                    &reported_cell_size,
+                );
             }
-            _ => windows_crossterm_reader_loop(event_tx, should_quit),
+            _ => windows_crossterm_reader_loop(
+                event_tx,
+                should_quit,
+                host_cell_size_query_sent,
+                &reported_cell_size,
+            ),
         }
     }
 }
@@ -342,8 +365,13 @@ fn windows_stdin_reader_loop(
 fn windows_crossterm_reader_loop(
     event_tx: mpsc::Sender<ClientLoopEvent>,
     should_quit: &Arc<AtomicBool>,
+    host_cell_size_query_sent: bool,
+    reported_cell_size: &AtomicU64,
 ) {
     let mut framer = crate::raw_input::RawInputFramer::for_host_input();
+    if host_cell_size_query_sent {
+        framer.host_cell_size_query_sent();
+    }
 
     while !should_quit.load(Ordering::Acquire) {
         match crossterm::event::poll(Duration::from_millis(10)) {
@@ -351,7 +379,11 @@ fn windows_crossterm_reader_loop(
             Ok(false) => {
                 if framer.has_pending_input() {
                     tracing::debug!("windows input raw sequence timed out; flushing");
-                    if !send_windows_raw_events(framer.flush_timeout(), &event_tx) {
+                    if !send_windows_raw_events(
+                        framer.flush_timeout(),
+                        &event_tx,
+                        reported_cell_size,
+                    ) {
                         return;
                     }
                 }
@@ -372,7 +404,7 @@ fn windows_crossterm_reader_loop(
                 pending_before = raw_sequence_pending,
                 "windows input routed through raw framer"
             );
-            if !send_windows_raw_events(framer.push(&bytes), &event_tx) {
+            if !send_windows_raw_events(framer.push(&bytes), &event_tx, reported_cell_size) {
                 return;
             }
             continue;
@@ -380,7 +412,7 @@ fn windows_crossterm_reader_loop(
 
         if raw_sequence_pending {
             tracing::debug!("windows input raw sequence interrupted by semantic event; flushing");
-            if !send_windows_raw_events(framer.flush_timeout(), &event_tx) {
+            if !send_windows_raw_events(framer.flush_timeout(), &event_tx, reported_cell_size) {
                 return;
             }
         }
@@ -401,7 +433,7 @@ fn windows_crossterm_reader_loop(
     }
 
     if framer.has_pending_input() {
-        let _ = send_windows_raw_events(framer.flush_timeout(), &event_tx);
+        let _ = send_windows_raw_events(framer.flush_timeout(), &event_tx, reported_cell_size);
     }
 }
 
@@ -482,11 +514,29 @@ fn windows_key_raw_bytes(
     }
 }
 
+#[cfg(any(windows, test))]
+fn store_host_cell_size_reports(
+    events: &[crate::raw_input::RawInputEvent],
+    reported_cell_size: &AtomicU64,
+) {
+    for event in events {
+        if let crate::raw_input::RawInputEvent::HostCellSizeReport {
+            width_px,
+            height_px,
+        } = event
+        {
+            super::store_reported_cell_size(reported_cell_size, *width_px, *height_px);
+        }
+    }
+}
+
 #[cfg(windows)]
 fn send_windows_raw_events(
     events: Vec<crate::raw_input::RawInputEvent>,
     event_tx: &mpsc::Sender<ClientLoopEvent>,
+    reported_cell_size: &AtomicU64,
 ) -> bool {
+    store_host_cell_size_reports(&events, reported_cell_size);
     let raw_event_count = events.len();
     let events = events
         .into_iter()

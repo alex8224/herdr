@@ -5385,6 +5385,27 @@ mod tests {
     }
 
     #[test]
+    fn textual_image_kitty_support_query_returns_ok() {
+        crate::kitty_graphics::set_enabled(true);
+        let (tx, _rx) = mpsc::channel(4);
+        let mut terminal = crate::ghostty::Terminal::new(80, 24, 0).unwrap();
+        terminal.enable_kitty_graphics().unwrap();
+        let pane_terminal = GhosttyPaneTerminal::new(terminal, tx.clone()).unwrap();
+
+        let result = pane_terminal.process_pty_bytes(
+            PaneId::from_raw(1),
+            0,
+            b"\x1b_Gi=42,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\",
+            &tx,
+        );
+
+        assert_eq!(
+            result.terminal_responses,
+            [Bytes::from_static(b"\x1b_Gi=42;OK\x1b\\")]
+        );
+    }
+
+    #[test]
     fn seeded_history_is_rendered_on_next_draw() {
         let (tx, _rx) = mpsc::channel(4);
         let terminal = crate::ghostty::Terminal::new(20, 5, 100).unwrap();

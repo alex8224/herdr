@@ -1101,7 +1101,7 @@ impl HeadlessServer {
         };
         let (cols, rows) = self.effective_size;
         let area = Rect::new(0, 0, cols, rows);
-        if self.app.state.kitty_graphics_enabled && client.cell_size.is_known() {
+        if client.cell_size.is_known() {
             crate::ui::compute_view_with_cell_size(
                 &mut self.app.state,
                 &self.app.terminal_runtimes,
@@ -1170,8 +1170,7 @@ impl HeadlessServer {
 
         let terminal_size = client.terminal_size;
         let outer_terminal_focus = client.outer_terminal_focus;
-        let host_cell_size = if self.app.state.kitty_graphics_enabled && client.cell_size.is_known()
-        {
+        let host_cell_size = if client.cell_size.is_known() {
             client.cell_size
         } else {
             crate::kitty_graphics::HostCellSize::default()
@@ -4382,12 +4381,11 @@ impl HeadlessServer {
             let mut frame = match mode {
                 ClientConnectionMode::App => {
                     let render_started = crate::render_prof::timer();
-                    let render_cell_size =
-                        if self.app.state.kitty_graphics_enabled && cell_size.is_known() {
-                            cell_size
-                        } else {
-                            crate::kitty_graphics::HostCellSize::default()
-                        };
+                    let render_cell_size = if cell_size.is_known() {
+                        cell_size
+                    } else {
+                        crate::kitty_graphics::HostCellSize::default()
+                    };
                     let preserved_scroll = (!is_foreground).then_some((
                         self.app.state.workspace_scroll,
                         self.app.state.agent_panel_scroll,
